@@ -2,10 +2,12 @@
 name = "time-series-library"
 version = "0.1.0"
 requires-python = ">=3.13"
-dependencies = [
-    "torch>=2.11.0",
-]
+dependencies = ["torch>=2.11.0"]
 
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+
+[tool.pyright]
+reportIncompatibleMethodOverride = false
