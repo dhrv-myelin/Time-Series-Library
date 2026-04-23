@@ -119,13 +119,26 @@ class MambaPAD(nn.Module):
         else:
             raise ValueError(f"task_name: {configs.task_name} is not valid.")
 
-    def forward(self, x_enc, x_mark_enc, x_dec=None, x_mark_dec=None, mask=None):
+    # basic forward for now. this one is meant for the the datasets already here
+    def forward(self, x_enc, x_mark_enc=None, x_dec=None, x_mark_dec=None, mask=None):
+        """
+        Args:
+            x_enc: (batch_size, seq_len, enc_in) - input time series
+            x_mark_enc: optional, not used for PAD
+            x_dec: optional, not used for PAD
+            x_mark_dec: optional, not used for PAD
+            mask: optional, not used for PAD
 
-        if self.task_name in ["precursor"]:  # binary value per window
-
-            # mamba_in = self.embedding(x_enc)  # (B, L_in, D)
-            # mamba_out = self.mamba(mamba_in)  # (B, L_in, D)
-
-            pass
+        Returns:
+            anomaly_logits: (batch_size, 1) - anomaly detection logits
+            poa_logits: (batch_size, 1) - precursor-of-anomaly detection logits
+        """
+        if self.task_name in ["precursor"]:
+            embed = self.embedding(x_enc)
+            mamba_out = self.mamba(embed)
+            pooled = mamba_out.mean(dim=1)
+            anomaly_logits = self.anomaly_head(pooled)
+            poa_logits = self.poa_head(pooled)
+            return anomaly_logits, poa_logits
         else:
             raise ValueError(f"task_name: {self.task_name} is not valid.")
