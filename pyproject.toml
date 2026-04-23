@@ -10,4 +10,10 @@ where = ["."]
 
 
 [tool.pyright]
+
+# override in parent class issue
 reportIncompatibleMethodOverride = false
+
+
+# Suppress the "__getitem__" not defined error specifically
+reportIndexIssue = "none"
