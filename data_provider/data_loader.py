@@ -477,11 +477,13 @@ class PSMSegLoader(Dataset):
 
 
 class MSLSegLoader(Dataset):
-    def __init__(self, args, root_path, win_size, step=1, flag="train"):
+    def __init__(self, args, root_path, win_size, step=1, flag="train", include_poa_label=False, poa_horizon=None):
         self.flag = flag
         self.step = step
         self.win_size = win_size
         self.scaler = StandardScaler()
+        self.include_poa_label = include_poa_label
+        self.poa_horizon = poa_horizon if poa_horizon else (win_size // 2)
         
         train_path = os.path.join(root_path, "MSL_train.npy")
         test_path  = os.path.join(root_path, "MSL_test.npy")
