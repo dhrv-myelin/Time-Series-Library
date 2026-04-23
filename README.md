@@ -180,26 +180,23 @@ python -u run.py \
 
 ### Quick Test
 
-Quick test for all 5 tasks (1 epoch each):
+Minimal 1-epoch smoke commands (one per task):
 
 ```bash
-# Run quick tests for all 5 tasks
-export CUDA_VISIBLE_DEVICES=0
+# Long-term forecasting
+python -u run.py --task_name long_term_forecast --is_training 1 --root_path ./dataset/ETT-small/ --data_path ETTh1.csv --model_id smoke_long --model DLinear --data ETTh1 --features M --seq_len 96 --label_len 48 --pred_len 96 --enc_in 7 --dec_in 7 --c_out 7 --train_epochs 1 --num_workers 2
 
-# 1. Long-term forecasting
-python -u run.py --task_name long_term_forecast --is_training 1 --root_path ./dataset/ETT-small/ --data_path ETTh1.csv --model_id test_long --model DLinear --data ETTh1 --features M --seq_len 96 --pred_len 96 --enc_in 7 --dec_in 7 --c_out 7 --train_epochs 1 --num_workers 2
+# Short-term forecasting (M4)
+python -u run.py --task_name short_term_forecast --is_training 1 --root_path ./dataset/m4 --seasonal_patterns Monthly --model_id smoke_m4_monthly --model TimesNet --data m4 --features M --enc_in 1 --dec_in 1 --c_out 1 --e_layers 2 --d_layers 1 --d_model 32 --d_ff 32 --top_k 5 --batch_size 16 --train_epochs 1 --learning_rate 0.001 --loss SMAPE --num_workers 2
 
-# 2. Short-term forecasting (using ETT dataset with shorter prediction length)
-python -u run.py --task_name long_term_forecast --is_training 1 --root_path ./dataset/ETT-small/ --data_path ETTh1.csv --model_id test_short --model TimesNet --data ETTh1 --features M --seq_len 24 --label_len 12 --pred_len 24 --e_layers 2 --d_layers 1 --d_model 16 --d_ff 32 --enc_in 7 --dec_in 7 --c_out 7 --top_k 5 --train_epochs 1 --num_workers 2
+# Imputation
+python -u run.py --task_name imputation --is_training 1 --root_path ./dataset/ETT-small/ --data_path ETTh1.csv --model_id smoke_imp --model TimesNet --data ETTh1 --features M --seq_len 96 --label_len 0 --pred_len 0 --e_layers 2 --d_layers 1 --d_model 16 --d_ff 32 --enc_in 7 --dec_in 7 --c_out 7 --top_k 3 --mask_rate 0.125 --learning_rate 0.001 --train_epochs 1 --num_workers 2
 
-# 3. Imputation
-python -u run.py --task_name imputation --is_training 1 --root_path ./dataset/ETT-small/ --data_path ETTh1.csv --model_id test_imp --model TimesNet --data ETTh1 --features M --seq_len 96 --e_layers 2 --d_layers 1 --d_model 16 --d_ff 32 --enc_in 7 --dec_in 7 --c_out 7 --top_k 3 --train_epochs 1 --num_workers 2 --label_len 0 --pred_len 0 --mask_rate 0.125 --learning_rate 0.001
+# Anomaly detection
+python -u run.py --task_name anomaly_detection --is_training 1 --root_path ./dataset/PSM --model_id smoke_psm --model TimesNet --data PSM --features M --seq_len 100 --pred_len 0 --e_layers 2 --d_model 64 --d_ff 64 --enc_in 25 --c_out 25 --top_k 3 --anomaly_ratio 1 --batch_size 128 --train_epochs 1 --num_workers 2
 
-# 4. Anomaly detection
-python -u run.py --task_name anomaly_detection --is_training 1 --root_path ./dataset/PSM --model_id test_ad --model TimesNet --data PSM --features M --seq_len 100 --pred_len 0 --d_model 64 --d_ff 64 --e_layers 2 --enc_in 25 --c_out 25 --anomaly_ratio 1.0 --top_k 3 --train_epochs 1 --batch_size 128 --num_workers 2
-
-# 5. Classification
-python -u run.py --task_name classification --is_training 1 --root_path ./dataset/Heartbeat/ --model_id Heartbeat --model TimesNet --data UEA --e_layers 2 --d_layers 1 --factor 3 --d_model 64 --d_ff 128 --top_k 3 --train_epochs 1 --batch_size 16 --learning_rate 0.001 --num_workers 0
+# Classification (UEA)
+python -u run.py --task_name classification --is_training 1 --root_path ./dataset/Heartbeat/ --model_id Heartbeat --model TimesNet --data UEA --e_layers 2 --d_layers 1 --factor 3 --d_model 64 --d_ff 128 --top_k 3 --batch_size 16 --learning_rate 0.001 --train_epochs 1 --num_workers 0
 ```
 
 
@@ -232,62 +229,18 @@ bash ./scripts/classification/TimesNet.sh
 
 (2) About anomaly detection: Some discussion about the adjustment strategy in anomaly detection can be found [here](https://github.com/thuml/Anomaly-Transformer/issues/14). The key point is that the adjustment strategy corresponds to an event-level metric.
 
-### Inspect the project structure:
+### Project layout (quick)
 
-```
-Time-Series-Library/
-├── README.md                     # Official README with tasks, leaderboard, usage
-├── requirements.txt              # pip dependency list for quick environment setup
-├── LICENSE / CONTRIBUTING.md     # Upstream license and contribution guide
-├── run.py                        # Unified entry that parses args and dispatches tasks
-├── exp/                          # Task pipelines wrapping train/val/test
-│   ├── exp_basic.py              # Experiment base class, registers models, builds flows
-│   ├── exp_long_term_forecasting.py    # Long-term forecasting logic
-│   ├── exp_short_term_forecasting.py   # Short-term forecasting logic
-│   ├── exp_imputation.py               # Missing-value imputation
-│   ├── exp_anomaly_detection.py        # Anomaly detection
-│   ├── exp_classification.py           # Classification
-│   └── exp_zero_shot_forecasting.py    # LTSM zero-shot evaluation
-├── data_provider/                # Dataset loaders and splits
-│   ├── data_factory.py           # Chooses the proper DataLoader per task
-│   ├── data_loader.py            # Generic TS reader with sliding-window logic
-│   ├── uea.py / m4.py            # Parsers for UEA, M4 and other formats
-│   └── __init__.py               # Exposes factory interfaces upward
-├── models/                       # All model implementations
-│   ├── TimesNet.py, TimeMixer.py # Main forecasting models
-│   ├── Chronos2.py, TiRex.py     # LTSM zero-shot models
-│   └── __init__.py               # Enables name-based instantiation inside exp
-├── layers/                       # Reusable attention / conv / embedding blocks
-│   ├── Transformer_EncDec.py     # Transformer stacks
-│   ├── AutoCorrelation.py        # Auto-correlation operator
-│   ├── MultiWaveletCorrelation.py# Frequency-domain unit
-│   └── Embed.py etc.             # Shared primitives
-├── utils/                        # Utility toolbox
-│   ├── metrics.py                # MSE / MAE / DTW and other metrics
-│   ├── tools.py                  # General helpers such as EarlyStopping
-│   ├── augmentation.py           # Augmentations for classification / detection
-│   ├── print_args.py             # Unified argument printer
-│   └── masking.py / losses.py    # Task-specific helpers
-├── scripts/                      # Bash recipes for reproducible experiments
-│   ├── long_term_forecast/       # Long-term forecasting per dataset/model
-│   ├── short_term_forecast/      # M4 and other short-term scripts
-│   ├── imputation/               # Imputation scripts
-│   ├── anomaly_detection/        # SMD / SMAP / SWAT detection scripts
-│   ├── classification/           # UEA classification scripts
-│   └── exogenous_forecast/       # TimeXer exogenous forecasting flow
-├── tutorial/                     # TimesNet tutorial notebook and figures
-└── pic/                          # README figures (dataset overview, etc.)
-```
+- `run.py`: unified entrypoint; chooses task pipeline by `--task_name`.
+- `exp/`: task pipelines (`long_term_forecast`, `short_term_forecast`, `imputation`, `anomaly_detection`, `classification`, `zero_shot_forecast`).
+- `data_provider/`: dataset factory and loaders (including auto-download fallbacks for common datasets).
+- `models/`: model implementations; `exp/exp_basic.py` auto-discovers files in this folder.
+- `layers/`: shared building blocks used by models.
+- `scripts/`: reproducible experiment commands (best source for per-task args).
 
-### Understand the project architecture:
+### Execution flow
 
-- **E2E flow**: configure experiments via `scripts/*.sh` → run `python run.py ...` → `run.py` parses arguments and selects the proper `Exp_*` via `task_name` → the experiment builds datasets through `data_provider`, instantiates networks from `models`, and drives train/val/test with utilities in `utils` → metrics and checkpoints are written to `./checkpoints`.
-- **Experiment layer (`exp/`)**: `Exp_Basic` registers models and devices; subclasses implement `_get_data`, `train`, and `test` to encapsulate task-specific differences so the same model can be reused.
-- **Model & layer layer (`models/` + `layers/`)**: model files define architectures, while reusable attention/conv/frequency components live in `layers/` to minimize duplication.
-- **Data layer (`data_provider/`)**: `data_factory` returns the correct `Dataset/DataLoader`; `data_loader` handles windowing, masking, and sampling, with arguments controlling window length, missing ratio, anomaly ratio, etc.
-- **Script layer (`scripts/`)**: bash scripts capture paper configurations (dataset, window, model, GPU) for reproducibility and serve as templates for custom runs.
-- **Utility layer (`utils/`)**: `metrics` centralizes evaluation, `tools` bundles essentials like `EarlyStopping` and `adjust_learning_rate`, while `augmentation`/`masking` cover task-specific preprocessing.
-- **Learning path**: recommended reading order is `scripts -> run.py -> exp/exp_basic.py -> corresponding Exp subclass -> data_provider -> models`, using `tutorial/TimesNet_tutorial.ipynb` as a guided walkthrough before diving deeper.
+`scripts/*.sh` -> `python -u run.py ...` -> task-specific `Exp_*` in `exp/` -> data from `data_provider/` -> model from `models/` -> outputs in `checkpoints/`, `results/`, `test_results/`, and `result_*txt`.
 
 ## Citation
 
