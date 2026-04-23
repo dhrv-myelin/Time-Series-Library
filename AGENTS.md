@@ -33,3 +33,30 @@
 - There is no repo-configured `pytest`/lint/typecheck/CI workflow in-tree; verification is usually a targeted `run.py` smoke run.
 - Minimal smoke pattern (1 epoch) is documented in `README.md` under "Quick Test"; use one command for the task you changed.
 - Outputs are written to `checkpoints/`, `results/`, `test_results/`, and `result_*txt` files at repo root.
+
+## PAD/PoA Implementation Backlog
+
+### Pending Tasks
+
+| # | Task | Priority |
+|----|------|----------|
+| 1 | Add CLI args (`poa_horizon`, `lambda_poa`) to run.py | HIGH |
+| 2 | Add task_name dispatch for 'precursor'/'poa' in run.py | HIGH |
+| 3 | Extend anomaly data loaders with PoA labels (5 loaders) | HIGH |
+| 4 | Apply loss weighting (lambda_poa) | HIGH |
+| 5 | Apply separate thresholds for anomaly/PoA | HIGH |
+| 6 | Apply early stopping on combined objective | HIGH |
+| 7 | Write example shell script | MEDIUM |
+| 8 | Add PTaPR metric (future enhancement) | LOW |
+
+### PAD-Specific Model
+
+- `models/PAD_SSM.py` — MambaPAD with dual-head output ✅ (completed)
+- `exp/exp_poa_anomaly_detection.py` — PoA experiment class ✅ (completed)
+- `data_provider/data_factory.py` — passes PoA params ✅ (completed)
+
+### Key Implementation Notes
+
+- PoA labels use horizon-based approach: `next_y = 1 if any(anomaly in next H steps)`
+- Default `poa_horizon = seq_len // 2`
+- Backward compatible: existing `anomaly_detection` task unchanged
