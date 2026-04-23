@@ -1,143 +1,131 @@
 import torch
 import torch.nn as nn
 
+from layers.Embed import PositionalEmbedding
+from layers.MambaBlock import Mamba_TimeVariant
 
-class EventEmbedding(nn.Module):
-    def __init__(self, num_events, emb_dim):
+## Embedding layers
+
+
+class TokenEmbedding_cls(nn.Module):
+    """TokenEmbedding with configurable kernel size(`d_kernel`)."""
+
+    def __init__(self, c_in, d_model, d_kernel=3):
         super().__init__()
-        self.embedding = nn.Embedding(num_events, emb_dim)
-
-    def forward(self, event_ids):
-        return self.embedding(event_ids)
-
-
-class DeltaTEncoder(nn.Module):
-    """
-    Encodes Δt into a vector (optional but useful)
-    """
-
-    def __init__(self, out_dim):
-        super().__init__()
-        self.mlp = nn.Sequential(
-            nn.Linear(1, out_dim),
-            nn.ReLU(),
-            nn.Linear(out_dim, out_dim),
+        self.tokenConv = nn.Conv1d(
+            in_channels=c_in,
+            out_channels=d_model,
+            kernel_size=d_kernel,
+            padding="same",
+            padding_mode="replicate",
+            bias=False,
         )
 
-    def forward(self, delta_t):
-        # delta_t: (B, T)
-        return self.mlp(delta_t.unsqueeze(-1))
+        for m in self.modules():
+            if isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(
+                    m.weight, mode="fan_in", nonlinearity="leaky_relu"
+                )
+
+    def forward(self, x):
+        x = self.tokenConv(x.permute(0, 2, 1)).transpose(1, 2)
+        return x
 
 
-class ContinuousSSM(nn.Module):
-    """
-    Implements:
-        z_i = exp(A * Δt_i) z_{i-1} + B u_i
+class DataEmbedding_cls(nn.Module):
+    """DataEmbedding with configurable kernel size(`d_kernel`) and sequence length(`seq_len`).
 
-    Uses a diagonal A for stability + efficiency
-    """
-
-    def __init__(self, hidden_dim, input_dim):
-        super().__init__()
-
-        self.hidden_dim = hidden_dim
-
-        # Diagonal A (log-param for stability)
-        self.log_diag_A = nn.Parameter(torch.randn(hidden_dim))
-
-        # Input projection
-        self.B = nn.Linear(input_dim, hidden_dim)
-
-    def forward(self, u, delta_t, z0=None):
-        """
-        u: (B, T, D)
-        delta_t: (B, T)
-        """
-        B, T, _ = u.shape
-
-        if z0 is None:
-            z = torch.zeros(B, self.hidden_dim, device=u.device)
-        else:
-            z = z0
-
-        outputs = []
-
-        diag_A = -torch.exp(self.log_diag_A)  # ensures stability
-
-        for t in range(T):
-            dt = delta_t[:, t].unsqueeze(-1)  # (B, 1)
-
-            # exp(A * Δt)
-            transition = torch.exp(diag_A * dt)
-
-            z = transition * z + self.B(u[:, t])
-            outputs.append(z)
-
-        return torch.stack(outputs, dim=1)  # (B, T, H)
-
-
-class SSMPADModel(nn.Module):
-    """
-    Full model:
-    - event embedding
-    - Δt encoding
-    - dual SSM branches
-    - anomaly + PoA heads
+    To solve the warning for EigenWorms dataset (seq_len=17984) while keeping consistency comparing with other models, we set max_len=max(5000, seq_len).
     """
 
     def __init__(
         self,
-        num_events,
-        emb_dim=32,
-        dt_dim=16,
-        hidden_dim=64,
-        share_A=True,
+        c_in,
+        d_model,
+        embed_type="fixed",  # pyright: ignore
+        freq="h",  # pyright: ignore
+        dropout=0.1,
+        d_kernel=3,
+        seq_len=5000,
     ):
+        super(DataEmbedding_cls, self).__init__()
+        self.value_embedding = TokenEmbedding_cls(
+            c_in=c_in, d_model=d_model, d_kernel=d_kernel
+        )
+        self.position_embedding = PositionalEmbedding(
+            d_model=d_model, max_len=max(5000, seq_len)
+        )
+        self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
+
+    def forward(self, x):
+        x = self.value_embedding(x) + self.position_embedding(x)
+        return self.dropout(x)
+
+
+## PAD SSM based model
+
+
+class MambaPAD(nn.Module):
+    def __init__(self, configs):
         super().__init__()
 
-        self.event_emb = EventEmbedding(num_events, emb_dim)
-        self.dt_encoder = DeltaTEncoder(dt_dim)
+        self.task_name = configs.task_name
+        self.seq_len = configs.seq_len
+        self.label_len = configs.label_len
+        self.pred_len = configs.pred_len
+        self.c_out = configs.c_out
+        self.dropout = configs.dropout
+        self.num_kernels = configs.num_kernels
 
-        input_dim = emb_dim + dt_dim
+        # this can be changed
+        self.mamba = nn.Sequential(
+            Mamba_TimeVariant(
+                d_model=configs.d_model,
+                d_state=configs.d_ff,
+                d_conv=configs.d_conv,
+                expand=configs.expand,
+                timevariant_dt=bool(
+                    configs.tv_dt
+                ),  # only available in Mamba_TimeVariant
+                timevariant_B=bool(configs.tv_B),  # only available in Mamba_TimeVariant
+                timevariant_C=bool(configs.tv_C),  # only available in Mamba_TimeVariant
+                use_D=bool(configs.use_D),  # use D(skip connection) or not
+                device=configs.device,
+            ),
+            nn.LayerNorm(configs.d_model),
+            nn.SiLU(),  # simply choose the same activation fn as Mamba Block
+        )
 
-        # Two SSM branches
-        self.ssm_anomaly = ContinuousSSM(hidden_dim, input_dim)
-        self.ssm_poa = ContinuousSSM(hidden_dim, input_dim)
+        if self.task_name in ["precursor"]:  # binary value per window
 
-        # Optional parameter sharing
-        if share_A:
-            self.ssm_poa.log_diag_A = self.ssm_anomaly.log_diag_A
+            self.embedding = DataEmbedding_cls(
+                configs.enc_in,
+                configs.d_model,
+                configs.embed,
+                configs.freq,
+                configs.dropout,
+                configs.num_kernels,
+                configs.seq_len,
+            )
 
-        # Heads
-        self.head_anomaly = nn.Linear(hidden_dim, 1)
-        self.head_poa = nn.Linear(hidden_dim, 1)
+            self.anomaly_head = nn.Sequential(
+                nn.Dropout(configs.dropout),
+                nn.Linear(configs.d_model, 1),
+            )
+            self.poa_head = nn.Sequential(
+                nn.Dropout(configs.dropout),
+                nn.Linear(configs.d_model, 1),
+            )
+        else:
+            raise ValueError(f"task_name: {configs.task_name} is not valid.")
 
-    def forward(self, event_ids, delta_t):
-        """
-        event_ids: (B, T)
-        delta_t: (B, T)
+    def forward(self, x_enc, x_mark_enc, x_dec=None, x_mark_dec=None, mask=None):
 
-        Returns:
-            y_a: anomaly prediction
-            y_p: precursor prediction
-        """
+        if self.task_name in ["precursor"]:  # binary value per window
 
-        # embeddings
-        e = self.event_emb(event_ids)  # (B, T, emb_dim)
-        dt = self.dt_encoder(delta_t)  # (B, T, dt_dim)
+            # mamba_in = self.embedding(x_enc)  # (B, L_in, D)
+            # mamba_out = self.mamba(mamba_in)  # (B, L_in, D)
 
-        u = torch.cat([e, dt], dim=-1)  # (B, T, D)
-
-        # SSM forward
-        h = self.ssm_anomaly(u, delta_t)  # (B, T, H)
-        z = self.ssm_poa(u, delta_t)  # (B, T, H)
-
-        # take final state
-        h_T = h[:, -1]
-        z_T = z[:, -1]
-
-        # heads
-        y_a = torch.sigmoid(self.head_anomaly(h_T)).squeeze(-1)
-        y_p = torch.sigmoid(self.head_poa(z_T)).squeeze(-1)
-
-        return y_a, y_p
+            pass
+        else:
+            raise ValueError(f"task_name: {self.task_name} is not valid.")
