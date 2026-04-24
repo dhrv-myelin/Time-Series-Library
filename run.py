@@ -421,13 +421,11 @@ if __name__ == "__main__":
     print("Args in experiment:")
     print_args(args)
 
-    # added new precursor experiment
-    if args.tas_name == "precrusor":
+    if args.task_name == "precursor":
         from exp.exp_poa_anomaly_detection import Exp_PoA_Detection
 
         Exp = Exp_PoA_Detection
-
-    if args.task_name == "long_term_forecast":
+    elif args.task_name == "long_term_forecast":
         from exp.exp_long_term_forecasting import Exp_Long_Term_Forecast
 
         Exp = Exp_Long_Term_Forecast
