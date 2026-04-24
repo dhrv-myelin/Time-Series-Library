@@ -155,6 +155,19 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=0.1, help='KNN for Graph Construction')
     parser.add_argument('--top_p', type=float, default=0.5, help='Dynamic Routing in MoE')
     parser.add_argument('--pos', type=int, choices=[0, 1], default=1, help='Positional Embedding. Set pos to 0 or 1')
+    # POA experiment
+    parser.add_argument(
+        "--poa_horizon",
+        type=int,
+        default=None,
+        help="PoA horizon (default: seq_len//2)",
+    )
+    parser.add_argument(
+        "--lambda_poa",
+        type=float,
+        default=1.0,
+        help="PoA loss weight",
+    )
 
     args = parser.parse_args()
     if torch.cuda.is_available() and args.use_gpu:
