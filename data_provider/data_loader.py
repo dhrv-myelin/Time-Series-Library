@@ -558,12 +558,9 @@ class PSMSegLoader(Dataset):
         self.val = self.train[(int)(data_len * 0.8) :]
         self.test_labels = test_label_df.values[:, 1:]
 
-
         # added POA labels
         if self.include_poa_label:
             self.poa_labels = self._compute_poa_labels(
-                self.test_labels, self.poa_horizon
-            )
                 self.test_labels, self.poa_horizon
             )
 
@@ -616,7 +613,7 @@ class PSMSegLoader(Dataset):
             )
 
 
-class MSLSegLoader(Dataset)
+class MSLSegLoader(Dataset):
     def __init__(
         self,
         args,
@@ -687,7 +684,6 @@ class MSLSegLoader(Dataset)
         else:
             return (self.end - self.start - self.win_size) // self.win_size + 1
 
-
     def __getitem__(self, index):
         index = self.start + index * self.step
 
@@ -716,6 +712,8 @@ class MSLSegLoader(Dataset)
                 return x, y, poa
             return x, y
         ################################################### old msl loader
+
+
 # class MSLSegLoader(Dataset)
 #     def __init__(
 #         self,
@@ -831,7 +829,7 @@ class MSLSegLoader(Dataset)
 #                 ]
 #             )
 
-    ################################################### old msl loader
+################################################### old msl loader
 
 
 class SMAPSegLoader(Dataset):
@@ -1015,7 +1013,6 @@ class SMDSegLoader(Dataset):
                 self.test_labels, self.poa_horizon
             )
 
-
         print("test:", self.test.shape)
         print("train:", self.train.shape)
 
@@ -1129,7 +1126,7 @@ class SWATSegLoader(Dataset):
         else:
             return (self.test.shape[0] - self.win_size) // self.win_size + 1
 
-# the og method for get item basically has unsupervised (reconstruction based) model. lets see with this how it goes
+    # the og method for get item basically has unsupervised (reconstruction based) model. lets see with this how it goes
     def __getitem__(self, index):
         index = index * self.step
 
@@ -1142,7 +1139,7 @@ class SWATSegLoader(Dataset):
 
             if self.include_poa_label:
                 x = get_window(self.train, index)
-                y = get_window(self.test_labels,index)
+                y = get_window(self.test_labels, index)
                 poa = get_window(self.poa_labels, index)
                 return x, y, poa
             return x, y
@@ -1153,7 +1150,7 @@ class SWATSegLoader(Dataset):
 
             if self.include_poa_label:
                 x = get_window(self.val, index)
-                y = get_window(self.test_labels,index)
+                y = get_window(self.test_labels, index)
                 poa = get_window(self.poa_labels, index)
                 return x, y, poa
             return x, y
@@ -1218,6 +1215,7 @@ class SWATSegLoader(Dataset):
     #         )
 
     ### old __getitem__
+
 
 class UEAloader(Dataset):
     """
