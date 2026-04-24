@@ -616,7 +616,7 @@ class PSMSegLoader(Dataset):
             )
 
 
-class MSLSegLoader(Dataset):
+class MSLSegLoader(Dataset)
     def __init__(
         self,
         args,
@@ -631,6 +631,8 @@ class MSLSegLoader(Dataset):
         self.step = step
         self.win_size = win_size
         self.scaler = StandardScaler()
+
+        # POA branch
         self.include_poa_label = include_poa_label
         self.poa_horizon = poa_horizon if poa_horizon else (win_size // 2)
 
@@ -638,89 +640,198 @@ class MSLSegLoader(Dataset):
         test_path = os.path.join(root_path, "MSL_test.npy")
         label_path = os.path.join(root_path, "MSL_test_label.npy")
 
-        if all(os.path.exists(p) for p in [train_path, test_path, label_path]):
-            train_data = np.load(train_path)
-            test_data = np.load(test_path)
-            test_label = np.load(label_path)
-        else:
-            train_path = hf_hub_download(
-                repo_id=HUGGINGFACE_REPO,
-                filename="MSL/MSL_train.npy",
-                repo_type="dataset",
-            )
-            test_path = hf_hub_download(
-                repo_id=HUGGINGFACE_REPO,
-                filename="MSL/MSL_test.npy",
-                repo_type="dataset",
-            )
-            label_path = hf_hub_download(
-                repo_id=HUGGINGFACE_REPO,
-                filename="MSL/MSL_test_label.npy",
-                repo_type="dataset",
-            )
+        train_data = np.load(train_path)
+        test_data = np.load(test_path)
+        test_label = np.load(label_path)
 
-            train_data = np.load(train_path)
-            test_data = np.load(test_path)
-            test_label = np.load(label_path)
-
+        # scale
         self.scaler.fit(train_data)
         train_data = self.scaler.transform(train_data)
         test_data = self.scaler.transform(test_data)
 
+        # store full sequences
         self.train = train_data
         self.test = test_data
         self.test_labels = test_label
 
-        data_len = len(self.train)
-        self.val = self.train[int(data_len * 0.8) :]
+        # POA labels (computed ONLY from test labels)
+        if self.include_poa_label:
+            self.poa_labels = self._compute_poa_labels(
+                self.test_labels, self.poa_horizon
+            )
 
-        print("test:", self.test.shape)
-        print("train:", self.train.shape)
+        # --- CRITICAL FIX: split TEST sequence ---
+        n = len(self.test)
+
+        train_end = int(0.6 * n)
+        val_end = int(0.8 * n)
+
+        if self.flag == "train":
+            self.start = 0
+            self.end = train_end
+        elif self.flag == "val":
+            self.start = train_end
+            self.end = val_end
+        elif self.flag == "test":
+            self.start = val_end
+            self.end = n
+        else:
+            self.start = 0
+            self.end = n
+
+        print(f"{self.flag} range: [{self.start}, {self.end}]")
 
     def __len__(self):
-        if self.flag == "train":
-            return (self.train.shape[0] - self.win_size) // self.step + 1
-        elif self.flag == "val":
-            return (self.val.shape[0] - self.win_size) // self.step + 1
-        elif self.flag == "test":
-            return (self.test.shape[0] - self.win_size) // self.step + 1
+        if self.flag in ["train", "val", "test"]:
+            return (self.end - self.start - self.win_size) // self.step + 1
         else:
-            return (self.test.shape[0] - self.win_size) // self.win_size + 1
+            return (self.end - self.start - self.win_size) // self.win_size + 1
+
 
     def __getitem__(self, index):
-        index = index * self.step
-        if self.flag == "train":
-            return np.float32(self.train[index : index + self.win_size]), np.float32(
-                self.test_labels[0 : self.win_size]
-            )
-        elif self.flag == "val":
-            return np.float32(self.val[index : index + self.win_size]), np.float32(
-                self.test_labels[0 : self.win_size]
-            )
-        elif self.flag == "test":
-            return np.float32(self.test[index : index + self.win_size]), np.float32(
-                self.test_labels[index : index + self.win_size]
-            )
+        index = self.start + index * self.step
+
+        def get_window(arr, start):
+            return np.float32(arr[start : start + self.win_size])
+
+        # --- TRAIN / VAL / TEST ---
+        if self.flag in ["train", "val", "test"]:
+            x = get_window(self.test, index)
+            y = get_window(self.test_labels, index)
+
+            if self.include_poa_label:
+                poa = get_window(self.poa_labels, index)
+                return x, y, poa
+            return x, y
+
+        # --- INFERENCE (non-overlapping) ---
         else:
-            return np.float32(
-                self.test[
-                    index
-                    // self.step
-                    * self.win_size : index
-                    // self.step
-                    * self.win_size
-                    + self.win_size
-                ]
-            ), np.float32(
-                self.test_labels[
-                    index
-                    // self.step
-                    * self.win_size : index
-                    // self.step
-                    * self.win_size
-                    + self.win_size
-                ]
-            )
+            base = self.start + (index // self.step) * self.win_size
+
+            x = get_window(self.test, base)
+            y = get_window(self.test_labels, base)
+
+            if self.include_poa_label:
+                poa = get_window(self.poa_labels, base)
+                return x, y, poa
+            return x, y
+        ################################################### old msl loader
+# class MSLSegLoader(Dataset)
+#     def __init__(
+#         self,
+#         args,
+#         root_path,
+#         win_size,
+#         step=1,
+#         flag="train",
+#         include_poa_label=False,
+#         poa_horizon=None,
+#     ):
+#         self.flag = flag
+#         self.step = step
+#         self.win_size = win_size
+#         self.scaler = StandardScaler()
+#         # POA branch
+#         self.include_poa_label = include_poa_label
+#         self.poa_horizon = poa_horizon if poa_horizon else (win_size // 2)
+#
+#         train_path = os.path.join(root_path, "MSL_train.npy")
+#         test_path = os.path.join(root_path, "MSL_test.npy")
+#         label_path = os.path.join(root_path, "MSL_test_label.npy")
+#
+#         if all(os.path.exists(p) for p in [train_path, test_path, label_path]):
+#             train_data = np.load(train_path)
+#             test_data = np.load(test_path)
+#             test_label = np.load(label_path)
+#         else:
+#             train_path = hf_hub_download(
+#                 repo_id=HUGGINGFACE_REPO,
+#                 filename="MSL/MSL_train.npy",
+#                 repo_type="dataset",
+#             )
+#             test_path = hf_hub_download(
+#                 repo_id=HUGGINGFACE_REPO,
+#                 filename="MSL/MSL_test.npy",
+#                 repo_type="dataset",
+#             )
+#             label_path = hf_hub_download(
+#                 repo_id=HUGGINGFACE_REPO,
+#                 filename="MSL/MSL_test_label.npy",
+#                 repo_type="dataset",
+#             )
+#
+#             train_data = np.load(train_path)
+#             test_data = np.load(test_path)
+#             test_label = np.load(label_path)
+#
+#         self.scaler.fit(train_data)
+#         train_data = self.scaler.transform(train_data)
+#         test_data = self.scaler.transform(test_data)
+#
+#         self.train = train_data
+#         self.test = test_data
+#         self.test_labels = test_label
+#
+#         # added POA labels
+#         if self.include_poa_label:
+#             self.poa_labels = self._compute_poa_labels(
+#                 self.test_labels, self.poa_horizon
+#             )
+#
+#         data_len = len(self.train)
+#         self.val = self.train[int(data_len * 0.8) :]
+#
+#         print("test:", self.test.shape)
+#         print("train:", self.train.shape)
+#
+#     def __len__(self):
+#         if self.flag == "train":
+#             return (self.train.shape[0] - self.win_size) // self.step + 1
+#         elif self.flag == "val":
+#             return (self.val.shape[0] - self.win_size) // self.step + 1
+#         elif self.flag == "test":
+#             return (self.test.shape[0] - self.win_size) // self.step + 1
+#         else:
+#             return (self.test.shape[0] - self.win_size) // self.win_size + 1
+#
+#
+#
+#     def __getitem__(self, index):
+#         index = index * self.step
+#         if self.flag == "train":
+#             return np.float32(self.train[index : index + self.win_size]), np.float32(
+#                 self.test_labels[0 : self.win_size]
+#             )
+#         elif self.flag == "val":
+#             return np.float32(self.val[index : index + self.win_size]), np.float32(
+#                 self.test_labels[0 : self.win_size]
+#             )
+#         elif self.flag == "test":
+#             return np.float32(self.test[index : index + self.win_size]), np.float32(
+#                 self.test_labels[index : index + self.win_size]
+#             )
+#         else:
+#             return np.float32(
+#                 self.test[
+#                     index
+#                     // self.step
+#                     * self.win_size : index
+#                     // self.step
+#                     * self.win_size
+#                     + self.win_size
+#                 ]
+#             ), np.float32(
+#                 self.test_labels[
+#                     index
+#                     // self.step
+#                     * self.win_size : index
+#                     // self.step
+#                     * self.win_size
+#                     + self.win_size
+#                 ]
+#             )
+
+    ################################################### old msl loader
 
 
 class SMAPSegLoader(Dataset):
@@ -1018,41 +1129,95 @@ class SWATSegLoader(Dataset):
         else:
             return (self.test.shape[0] - self.win_size) // self.win_size + 1
 
+# the og method for get item basically has unsupervised (reconstruction based) model. lets see with this how it goes
     def __getitem__(self, index):
         index = index * self.step
-        if self.flag == "train":
-            return np.float32(self.train[index : index + self.win_size]), np.float32(
-                self.test_labels[0 : self.win_size]
-            )
-        elif self.flag == "val":
-            return np.float32(self.val[index : index + self.win_size]), np.float32(
-                self.test_labels[0 : self.win_size]
-            )
-        elif self.flag == "test":
-            return np.float32(self.test[index : index + self.win_size]), np.float32(
-                self.test_labels[index : index + self.win_size]
-            )
-        else:
-            return np.float32(
-                self.test[
-                    index
-                    // self.step
-                    * self.win_size : index
-                    // self.step
-                    * self.win_size
-                    + self.win_size
-                ]
-            ), np.float32(
-                self.test_labels[
-                    index
-                    // self.step
-                    * self.win_size : index
-                    // self.step
-                    * self.win_size
-                    + self.win_size
-                ]
-            )
 
+        def get_window(data, start):
+            return np.float32(data[start : start + self.win_size])
+
+        if self.flag == "train":
+            x = get_window(self.train, index)
+            y = get_window(self.test_labels, 0)
+
+            if self.include_poa_label:
+                x = get_window(self.train, index)
+                y = get_window(self.test_labels,index)
+                poa = get_window(self.poa_labels, index)
+                return x, y, poa
+            return x, y
+
+        elif self.flag == "val":
+            x = get_window(self.val, index)
+            y = get_window(self.test_labels, 0)
+
+            if self.include_poa_label:
+                x = get_window(self.val, index)
+                y = get_window(self.test_labels,index)
+                poa = get_window(self.poa_labels, index)
+                return x, y, poa
+            return x, y
+
+        elif self.flag == "test":
+            x = get_window(self.test, index)
+            y = get_window(self.test_labels, index)
+
+            if self.include_poa_label:
+                x = get_window(self.test, index)
+                y = get_window(self.test_labels, index)
+                poa = get_window(self.poa_labels, index)
+                return x, y, poa
+            return x, y
+
+        else:
+            base = (index // self.step) * self.win_size
+
+            x = get_window(self.test, base)
+            y = get_window(self.test_labels, base)
+
+            if self.include_poa_label:
+                poa = get_window(self.poa_labels, base)
+                return x, y, poa
+            return x, y
+
+    ### old __getitem__
+
+    # def __getitem__(self, index):
+    #     index = index * self.step
+    #     if self.flag == "train":
+    #         return np.float32(self.train[index : index + self.win_size]), np.float32(
+    #             self.test_labels[0 : self.win_size]
+    #         )
+    #     elif self.flag == "val":
+    #         return np.float32(self.val[index : index + self.win_size]), np.float32(
+    #             self.test_labels[0 : self.win_size]
+    #         )
+    #     elif self.flag == "test":
+    #         return np.float32(self.test[index : index + self.win_size]), np.float32(
+    #             self.test_labels[index : index + self.win_size]
+    #         )
+    #     else:
+    #         return np.float32(
+    #             self.test[
+    #                 index
+    #                 // self.step
+    #                 * self.win_size : index
+    #                 // self.step
+    #                 * self.win_size
+    #                 + self.win_size
+    #             ]
+    #         ), np.float32(
+    #             self.test_labels[
+    #                 index
+    #                 // self.step
+    #                 * self.win_size : index
+    #                 // self.step
+    #                 * self.win_size
+    #                 + self.win_size
+    #             ]
+    #         )
+
+    ### old __getitem__
 
 class UEAloader(Dataset):
     """
