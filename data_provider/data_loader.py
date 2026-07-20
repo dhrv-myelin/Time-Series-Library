@@ -950,6 +950,16 @@ class SMAPSegLoader(Dataset):
 
 
 class SMDSegLoader(Dataset):
+
+    def _compute_poa_labels(self, anomaly_labels, horizon):
+        """PoA[t] = 1 if any(anomaly in next H steps, else 0"""
+        n = len(anomaly_labels)
+        poa = np.zeros(n, dtype=np.float32)
+        for t in range(n - horizon):
+            if np.any(anomaly_labels[t + 1 : t + horizon + 1] == 1):
+                poa[t] = 1.0
+        return poa
+
     def __init__(
         self,
         args,
